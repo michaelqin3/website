@@ -304,7 +304,7 @@ button:focus {
   background-image: -moz-linear-gradient( 0deg, #002855, #4539ee);
 	background-image: -webkit-linear-gradient( 0deg, #002855, #4539ee);
   background-image: -ms-linear-gradient( 0deg, #002855, #4539ee);     
-  margin-bottom: 200px; }
+  margin-bottom: 50px; }
   .home_banner_area .box_1620 {
     min-height: 0px;
     border-radius: 12px;
