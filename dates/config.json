@@ -1,0 +1,16 @@
+{
+  "supabaseUrl": "https://omenfheaidgizaiqttfz.supabase.co",
+  "supabaseKey": "sb_publishable_63u19sRSm0ZphhjeDzUyjw_FWy_Dmc5",
+  "tileUrl": "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+  "attribution": "&copy; <a href=\"https://www.openstreetmap.org/copyright\">OpenStreetMap</a> contributors",
+  "center": [
+    40.73,
+    -73.97
+  ],
+  "bbox": [
+    -74.26,
+    40.49,
+    -73.7,
+    40.92
+  ]
+}

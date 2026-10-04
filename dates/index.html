@@ -1,0 +1,480 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Our Dates</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{--bg:#fbf8f3;--card:#fff;--ink:#2b2622;--muted:#8a8078;--accent:#d9534f;--line:#ece6dd;--r:14px}
+  *{box-sizing:border-box}
+  body{margin:0;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;background:var(--bg);color:var(--ink)}
+  header{position:sticky;top:0;z-index:1000;background:rgba(251,248,243,.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+  .wrap{max-width:960px;margin:0 auto;padding:0 16px}
+  .top{display:flex;align-items:center;justify-content:space-between;height:58px}
+  h1{font-size:20px;margin:0;letter-spacing:-.01em}
+  h1 small{color:var(--muted);font-weight:400;font-size:13px;margin-left:8px}
+  nav{display:flex;gap:4px;padding-bottom:10px}
+  nav button{border:0;background:transparent;padding:7px 14px;border-radius:999px;font-size:14px;cursor:pointer;color:var(--muted)}
+  nav button.active{background:var(--ink);color:#fff}
+  .btn{border:0;background:var(--accent);color:#fff;padding:8px 14px;border-radius:999px;font-size:14px;cursor:pointer;font-weight:600}
+  .btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+  .btn.sm{padding:5px 10px;font-size:12px}
+  main{padding:16px 0 60px}
+  .view{display:none}.view.active{display:block}
+  #map{height:calc(100vh - 140px);min-height:420px;border-radius:var(--r);border:1px solid var(--line)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);overflow:hidden;cursor:pointer;transition:transform .12s}
+  .card:hover{transform:translateY(-2px)}
+  .card .ph{aspect-ratio:4/3;background:#f1ece4 center/cover no-repeat;display:flex;align-items:center;justify-content:center;font-size:40px}
+  .card .b{padding:12px 14px}
+  .card h3{margin:0 0 2px;font-size:16px}
+  .meta{color:var(--muted);font-size:13px}
+  .stars{color:#e8a33d;letter-spacing:1px}
+  .empty{text-align:center;color:var(--muted);padding:60px 0}
+  .wish{display:flex;gap:12px;align-items:flex-start;background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:14px 16px;margin-bottom:10px}
+  .wish .t{flex:1}.wish h3{margin:0;font-size:16px}
+  .wish p{margin:4px 0 0;color:var(--muted);font-size:14px}
+  .wish .acts{display:flex;gap:6px;flex-shrink:0}
+  /* modal */
+  .modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:flex-start;justify-content:center;z-index:2000;padding:30px 12px;overflow:auto}
+  .modal.open{display:flex}
+  .sheet{background:#fff;border-radius:18px;width:100%;max-width:560px;padding:22px}
+  .sheet h2{margin:0 0 14px;font-size:20px}
+  label{display:block;font-size:12px;color:var(--muted);margin:12px 0 4px;text-transform:uppercase;letter-spacing:.04em}
+  input[type=text],input[type=date],textarea,select{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;font:inherit;background:#fcfbf9}
+  textarea{min-height:110px;resize:vertical}
+  .row{display:flex;gap:10px}.row>*{flex:1}
+  .results{border:1px solid var(--line);border-radius:10px;margin-top:4px;max-height:180px;overflow:auto;display:none;background:#fff}
+  .results div{padding:8px 12px;cursor:pointer;font-size:13px;border-bottom:1px solid var(--line)}
+  .results div:hover{background:#f6f2eb}
+  .picked{font-size:13px;color:#2e7d4f;margin-top:4px}
+  .thumbs{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+  .thumbs img{width:64px;height:64px;object-fit:cover;border-radius:8px}
+  .rate{display:flex;gap:4px;font-size:26px;cursor:pointer;user-select:none}
+  .rate span{color:#ddd}.rate span.on{color:#e8a33d}
+  .foot{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
+  /* detail */
+  .gal{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px;margin:12px 0}
+  .gal img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:10px;cursor:zoom-in}
+  .review{white-space:pre-wrap;margin:10px 0}
+  .popup h4{margin:0 0 2px}.popup{font-size:13px}
+  .popup img{width:100%;border-radius:8px;margin-top:6px}
+  .photopin{width:44px;height:44px;border-radius:50%;border:3px solid #fff;background:#eee center/cover no-repeat;box-shadow:0 2px 6px rgba(0,0,0,.35);position:relative}
+  .photopin::after{content:"";position:absolute;left:50%;bottom:-9px;margin-left:-6px;border:6px solid transparent;border-top-color:#fff;border-bottom:0}
+  /* login */
+  #login{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px}
+  #login form{background:#fff;border:1px solid var(--line);border-radius:18px;padding:26px;width:100%;max-width:360px}
+  #login h1{margin-bottom:6px}
+  #login input{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;font:inherit;background:#fcfbf9}
+  #login .btn{width:100%;margin-top:16px;padding:10px}
+  .err{color:var(--accent);font-size:13px;margin-top:10px;min-height:1em}
+  body:not(.authed) #app, body.authed #login{display:none}
+  .busy{opacity:.6;pointer-events:none}
+  @media(max-width:600px){
+    .top .btn{padding:6px 10px;font-size:13px}
+    #map{height:calc(100vh - 150px)}
+  }
+</style>
+</head>
+<body>
+<section id="login">
+  <form onsubmit="signIn(event)">
+    <h1>💌 Our Dates</h1>
+    <p class="meta">Private. Sign in to continue.</p>
+    <label>Email</label><input type="email" name="email" autocomplete="username" required>
+    <label>Password</label><input type="password" name="password" autocomplete="current-password" required>
+    <button class="btn">Sign in</button>
+    <div class="err" id="login-err"></div>
+  </form>
+</section>
+
+<div id="app">
+<header>
+  <div class="wrap">
+    <div class="top">
+      <h1>💌 Our Dates <small id="count"></small></h1>
+      <div style="display:flex;gap:6px">
+        <button class="btn ghost" onclick="openWishForm()">+ Wish</button>
+        <button class="btn" onclick="openDateForm()">+ Date</button>
+      </div>
+    </div>
+    <nav>
+      <button data-v="map" class="active">🗺️ Map</button>
+      <button data-v="list">📋 List</button>
+      <button data-v="wish">✨ Wishlist</button>
+      <button style="margin-left:auto" onclick="signOut()">Sign out</button>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <section id="v-map" class="view active"><div id="map"></div></section>
+  <section id="v-list" class="view"><div id="list" class="grid"></div></section>
+  <section id="v-wish" class="view"><div id="wishlist"></div></section>
+</main>
+</div>
+
+<!-- Add / edit date -->
+<div class="modal" id="m-date" onclick="if(event.target===this)closeModals()">
+  <form class="sheet" id="f-date" onsubmit="saveDate(event)">
+    <h2 id="f-date-title">New date</h2>
+    <input type="hidden" name="id">
+    <label>Title</label>
+    <input type="text" name="title" required placeholder="Ramen + arcade night">
+    <label>Location</label>
+    <input type="text" id="d-loc" placeholder="Search a place or address…" autocomplete="off">
+    <div class="results" id="d-results"></div>
+    <div class="picked" id="d-picked"></div>
+    <div class="row">
+      <div><label>Date</label><input type="date" name="date"></div>
+      <div><label>Rating</label><div class="rate" id="d-rate"></div></div>
+    </div>
+    <label>Review</label>
+    <textarea name="review" placeholder="How was it? What did you eat, what would you do again…"></textarea>
+    <label>Photos</label>
+    <input type="file" id="d-photos" accept="image/*" multiple>
+    <div class="thumbs" id="d-thumbs"></div>
+    <div class="foot">
+      <button type="button" class="btn ghost" onclick="closeModals()">Cancel</button>
+      <button class="btn" id="d-save">Save</button>
+    </div>
+  </form>
+</div>
+
+<!-- Add wish -->
+<div class="modal" id="m-wish" onclick="if(event.target===this)closeModals()">
+  <form class="sheet" id="f-wish" onsubmit="saveWish(event)">
+    <h2>Add to wishlist</h2>
+    <label>Place / idea</label>
+    <input type="text" name="title" required placeholder="That rooftop bar in Williamsburg">
+    <label>Location (optional)</label>
+    <input type="text" id="w-loc" placeholder="Search a place…" autocomplete="off">
+    <div class="results" id="w-results"></div>
+    <div class="picked" id="w-picked"></div>
+    <label>Note</label>
+    <textarea name="note" placeholder="Why we want to go, link, who recommended it…" style="min-height:70px"></textarea>
+    <div class="foot">
+      <button type="button" class="btn ghost" onclick="closeModals()">Cancel</button>
+      <button class="btn">Save</button>
+    </div>
+  </form>
+</div>
+
+<!-- Detail -->
+<div class="modal" id="m-detail" onclick="if(event.target===this)closeModals()">
+  <div class="sheet" id="detail"></div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+let sb;                                  // Supabase client
+let db = {dates: [], wishlist: []};
+let urls = {};                           // photo path -> signed URL
+let cfg = {center: [40.73, -73.97], bbox: [-74.26, 40.49, -73.70, 40.92]};  // NYC defaults
+let map, layer;
+let picked = {d: null, w: null};         // selected place per form
+let photos = [], origPhotos = [], newUploads = [];  // photo paths for the date being edited
+let rating = 0, pendingWishId = null, saved = false;
+const BUCKET = 'photos';
+
+// ---------- startup & auth ----------
+async function start() {
+  try { Object.assign(cfg, await (await fetch('config.json?t=' + Date.now())).json()); } catch {}
+  if (!cfg.supabaseUrl || !cfg.supabaseKey) { $('#login-err').textContent = 'Not configured yet: add supabaseUrl and supabaseKey to config.json.'; return; }
+  sb = supabase.createClient(cfg.supabaseUrl, cfg.supabaseKey);
+  sb.auth.onAuthStateChange((_e, session) => setTimeout(() => session ? enter() : leave(), 0));
+}
+async function signIn(e) {
+  e.preventDefault();
+  const f = e.target; f.classList.add('busy'); $('#login-err').textContent = '';
+  const {error} = await sb.auth.signInWithPassword({email: f.email.value.trim(), password: f.password.value});
+  f.classList.remove('busy');
+  if (error) $('#login-err').textContent = error.message;
+}
+async function signOut() { await sb.auth.signOut(); }
+let entered = false;
+async function enter() {
+  if (entered) return; entered = true;
+  const {data: ok} = await sb.rpc('is_allowed');
+  if (!ok) {
+    entered = false;
+    const email = (await sb.auth.getUser()).data.user?.email;
+    await sb.auth.signOut();
+    $('#login-err').textContent = `${email || 'This account'} is not on the allowed list.`;
+    return;
+  }
+  document.body.classList.add('authed');
+  if (!map) initMap();
+  setTimeout(() => map.invalidateSize(), 50);
+  await load();
+}
+function leave() {
+  entered = false; db = {dates: [], wishlist: []}; urls = {};
+  document.body.classList.remove('authed'); closeModals();
+}
+
+// ---------- data ----------
+function check({data, error}) { if (error) { alert(error.message); throw error; } return data; }
+async function load() {
+  const [d, w] = await Promise.all([
+    sb.from('dates').select('*').order('date', {ascending: false, nullsFirst: false}).order('created_at', {ascending: false}),
+    sb.from('wishlist').select('*').order('created_at', {ascending: false}),
+  ]);
+  db = {dates: check(d), wishlist: check(w)};
+  await signPhotos(db.dates.flatMap(x => x.photos || []));
+  render();
+}
+async function signPhotos(paths) {
+  paths = paths.filter(p => !urls[p]);
+  if (!paths.length) return;
+  const {data} = await sb.storage.from(BUCKET).createSignedUrls(paths, 60 * 60 * 12);
+  (data || []).forEach(r => { if (r.signedUrl) urls[r.path] = r.signedUrl; });
+}
+const purl = p => urls[p] || '';
+async function removePhotos(paths) { if (paths.length) await sb.storage.from(BUCKET).remove(paths); }
+async function del(kind, id) {
+  if (!confirm('Delete this?')) return;
+  const item = db[kind].find(x => x.id === id);
+  check(await sb.from(kind).delete().eq('id', id));
+  if (kind === 'dates') await removePhotos(item?.photos || []);
+  closeModals(); load();
+}
+
+// ---------- tabs ----------
+document.querySelectorAll('nav button[data-v]').forEach(b => b.onclick = () => showView(b.dataset.v));
+function showView(v) {
+  document.querySelectorAll('nav button[data-v]').forEach(b => b.classList.toggle('active', b.dataset.v === v));
+  document.querySelectorAll('.view').forEach(s => s.classList.toggle('active', s.id === 'v-' + v));
+  if (v === 'map') setTimeout(() => map.invalidateSize(), 50);
+}
+
+// ---------- map ----------
+function initMap() {
+  map = L.map('map').setView(cfg.center, 12);
+  layer = L.layerGroup().addTo(map);
+  L.tileLayer(cfg.tileUrl || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19, attribution: cfg.attribution || '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+  }).addTo(map);
+}
+const pin = (emoji) => L.divIcon({html: `<div style="font-size:26px;line-height:1;filter:drop-shadow(0 1px 2px rgba(0,0,0,.4))">${emoji}</div>`, className: '', iconSize: [26, 26], iconAnchor: [13, 26], popupAnchor: [0, -24]});
+const photoPin = (src) => L.divIcon({html: `<div class="photopin" style="background-image:url('${src}')"></div>`, className: '', iconSize: [44, 44], iconAnchor: [22, 50], popupAnchor: [0, -48]});
+
+function renderMap() {
+  layer.clearLayers();
+  const pts = [];
+  db.dates.filter(d => d.lat != null).forEach(d => {
+    const first = purl(d.photos?.[0]);
+    const m = L.marker([d.lat, d.lng], {icon: first ? photoPin(first) : pin('❤️')}).addTo(layer);
+    m.bindPopup(`<div class="popup"><h4>${esc(d.title)}</h4><span class="stars">${stars(d.rating)}</span> <span class="meta">${d.date || ''}</span>${first ? `<img src="${first}">` : ''}<br><a href="#" onclick="openDetail('${d.id}');return false">Open</a></div>`);
+    pts.push([d.lat, d.lng]);
+  });
+  db.wishlist.filter(w => w.lat != null).forEach(w => {
+    const m = L.marker([w.lat, w.lng], {icon: pin('✨'), opacity: .85}).addTo(layer);
+    m.bindPopup(`<div class="popup"><h4>${esc(w.title)}</h4><span class="meta">Wishlist · ${esc(w.place || '')}</span>${w.note ? `<p>${esc(w.note)}</p>` : ''}</div>`);
+    pts.push([w.lat, w.lng]);
+  });
+  if (pts.length) map.fitBounds(pts, {padding: [40, 40], maxZoom: 14});
+}
+
+// ---------- list ----------
+function renderList() {
+  const el = $('#list');
+  if (!db.dates.length) { el.innerHTML = '<div class="empty">No dates yet. Add your first one!</div>'; return; }
+  el.innerHTML = db.dates.map(d => {
+    const first = purl(d.photos?.[0]);
+    return `
+    <div class="card" onclick="openDetail('${d.id}')">
+      <div class="ph" style="${first ? `background-image:url('${first}')` : ''}">${first ? '' : '💌'}</div>
+      <div class="b">
+        <h3>${esc(d.title)}</h3>
+        <div class="meta">${esc(d.place || '')}</div>
+        <div class="meta"><span class="stars">${stars(d.rating)}</span> ${d.date ? '· ' + d.date : ''}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ---------- wishlist ----------
+function renderWish() {
+  const el = $('#wishlist');
+  if (!db.wishlist.length) { el.innerHTML = '<div class="empty">Wishlist is empty. Add somewhere you want to go!</div>'; return; }
+  el.innerHTML = db.wishlist.map(w => `
+    <div class="wish">
+      <div style="font-size:22px">✨</div>
+      <div class="t"><h3>${esc(w.title)}</h3>
+        ${w.place ? `<p>📍 ${esc(w.place)}</p>` : ''}
+        ${w.note ? `<p>${esc(w.note)}</p>` : ''}</div>
+      <div class="acts">
+        <button class="btn sm" onclick="convertWish('${w.id}')">We went!</button>
+        <button class="btn sm ghost" onclick="del('wishlist','${w.id}')">✕</button>
+      </div>
+    </div>`).join('');
+}
+
+function render() {
+  $('#count').textContent = `${db.dates.length} date${db.dates.length === 1 ? '' : 's'}`;
+  renderMap(); renderList(); renderWish();
+}
+
+// ---------- place search (Photon / OpenStreetMap, limited to cfg.bbox) ----------
+function wireSearch(inputId, resultsId, pickedId, key) {
+  const inp = $(inputId), res = $(resultsId), pk = $(pickedId);
+  let t;
+  inp.oninput = () => {
+    clearTimeout(t);
+    picked[key] = null; pk.textContent = '';
+    const q = inp.value.trim();
+    if (q.length < 3) { res.style.display = 'none'; return; }
+    t = setTimeout(async () => {
+      const [lat, lon] = cfg.center, bbox = cfg.bbox.join(',');
+      const r = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=7&lang=en&lat=${lat}&lon=${lon}&bbox=${bbox}`);
+      const items = (await r.json()).features.map(f => {
+        const p = f.properties;
+        const street = [p.housenumber, p.street].filter(Boolean).join(' ');
+        const name = p.name || street;
+        const area = p.district || p.city;
+        const addr = [p.name && street, area, p.city !== area ? p.city : null].filter(Boolean).join(', ');
+        return {name, addr, kind: (p.osm_value || '').replace(/_/g, ' '), lat: f.geometry.coordinates[1], lng: f.geometry.coordinates[0]};
+      });
+      res.innerHTML = items.map((it, i) => `<div data-i="${i}"><b>${esc(it.name)}</b> <span class="meta">${esc(it.kind)}</span><br><span class="meta">${esc(it.addr)}</span></div>`).join('') || '<div>No results</div>';
+      res.style.display = 'block';
+      res.querySelectorAll('div[data-i]').forEach(d => d.onclick = () => {
+        const it = items[d.dataset.i];
+        picked[key] = {place: it.name, lat: it.lat, lng: it.lng};
+        inp.value = it.name;
+        pk.textContent = '📍 ' + [it.name, it.addr].filter(Boolean).join(', ');
+        res.style.display = 'none';
+      });
+    }, 350);
+  };
+}
+wireSearch('#d-loc', '#d-results', '#d-picked', 'd');
+wireSearch('#w-loc', '#w-results', '#w-picked', 'w');
+
+// ---------- date form ----------
+function setRating(n) {
+  rating = n;
+  $('#d-rate').innerHTML = [1, 2, 3, 4, 5].map(i => `<span class="${i <= n ? 'on' : ''}" onclick="setRating(${i})">★</span>`).join('');
+}
+function openDateForm(d = null, prefill = null) {
+  const f = $('#f-date'); f.reset();
+  d = d || prefill || {};
+  $('#f-date-title').textContent = d.id ? 'Edit date' : 'New date';
+  f.id.value = d.id || '';
+  f.title.value = d.title || '';
+  f.date.value = d.date || new Date().toISOString().slice(0, 10);
+  f.review.value = d.review || '';
+  $('#d-loc').value = d.place || '';
+  picked.d = d.lat != null ? {place: d.place, lat: d.lat, lng: d.lng} : null;
+  $('#d-picked').textContent = picked.d ? '📍 ' + d.place : '';
+  photos = [...(d.photos || [])]; origPhotos = [...photos]; newUploads = []; saved = false;
+  setRating(d.rating || 0);
+  renderThumbs();
+  $('#m-date').classList.add('open');
+}
+function renderThumbs() {
+  $('#d-thumbs').innerHTML = photos.map((p, i) => `<img src="${purl(p)}" title="click to remove" onclick="photos.splice(${i},1);renderThumbs()">`).join('');
+}
+// Shrink photos before upload: max 1600px JPEG keeps storage small (~300KB each).
+async function shrink(file) {
+  try {
+    const bmp = await createImageBitmap(file);
+    const s = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
+    const c = Object.assign(document.createElement('canvas'), {width: Math.round(bmp.width * s), height: Math.round(bmp.height * s)});
+    c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+    const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.82));
+    return blob ? {blob, ext: 'jpg', type: 'image/jpeg'} : null;
+  } catch { return null; }
+}
+$('#d-photos').onchange = async e => {
+  const btn = $('#d-save'); btn.disabled = true; btn.textContent = 'Uploading…';
+  try {
+    for (const file of e.target.files) {
+      const small = await shrink(file);
+      const blob = small?.blob || file;
+      const ext = small?.ext || (file.name.split('.').pop() || 'jpg').toLowerCase();
+      const path = `${crypto.randomUUID()}.${ext}`;
+      check(await sb.storage.from(BUCKET).upload(path, blob, {contentType: small?.type || file.type}));
+      newUploads.push(path); photos.push(path);
+    }
+    await signPhotos(newUploads);
+    renderThumbs();
+  } finally { btn.disabled = false; btn.textContent = 'Save'; e.target.value = ''; }
+};
+async function saveDate(e) {
+  e.preventDefault();
+  const f = e.target, btn = $('#d-save');
+  const item = {
+    title: f.title.value.trim(), date: f.date.value || null,
+    review: f.review.value.trim(), rating, photos,
+    place: picked.d?.place || $('#d-loc').value.trim() || null,
+    lat: picked.d?.lat ?? null, lng: picked.d?.lng ?? null,
+  };
+  btn.disabled = true;
+  try {
+    if (f.id.value) check(await sb.from('dates').update(item).eq('id', f.id.value));
+    else check(await sb.from('dates').insert(item));
+    saved = true;
+    // photos removed while editing, including ones uploaded in this form and then removed
+    await removePhotos([...origPhotos, ...newUploads].filter(p => !photos.includes(p)));
+    if (pendingWishId) check(await sb.from('wishlist').delete().eq('id', pendingWishId));
+  } finally { btn.disabled = false; }
+  closeModals(); load();
+}
+
+// ---------- wish form ----------
+function openWishForm() {
+  $('#f-wish').reset(); picked.w = null; $('#w-picked').textContent = '';
+  $('#m-wish').classList.add('open');
+}
+async function saveWish(e) {
+  e.preventDefault();
+  const f = e.target;
+  check(await sb.from('wishlist').insert({
+    title: f.title.value.trim(), note: f.note.value.trim() || null,
+    place: picked.w?.place || $('#w-loc').value.trim() || null,
+    lat: picked.w?.lat ?? null, lng: picked.w?.lng ?? null,
+  }));
+  closeModals(); load();
+}
+function convertWish(id) {
+  const w = db.wishlist.find(x => x.id === id);
+  openDateForm(null, {title: w.title, place: w.place, lat: w.lat, lng: w.lng});
+  pendingWishId = id;
+}
+
+// ---------- detail ----------
+function openDetail(id) {
+  const d = db.dates.find(x => x.id === id); if (!d) return;
+  $('#detail').innerHTML = `
+    <h2 style="margin-bottom:2px">${esc(d.title)}</h2>
+    <div class="meta">${d.place ? '📍 ' + esc(d.place) + ' · ' : ''}${d.date || ''} · <span class="stars">${stars(d.rating)}</span></div>
+    ${d.photos?.length ? `<div class="gal">${d.photos.map(p => `<img src="${purl(p)}" onclick="window.open(this.src)">`).join('')}</div>` : ''}
+    ${d.review ? `<p class="review">${esc(d.review)}</p>` : '<p class="meta">No review yet.</p>'}
+    <div class="foot">
+      <button class="btn ghost" onclick="del('dates','${d.id}')">Delete</button>
+      <button class="btn ghost" onclick="closeModals();openDateForm(db.dates.find(x=>x.id==='${d.id}'))">Edit</button>
+      ${d.lat != null ? `<button class="btn" onclick="closeModals();showView('map');map.setView([${d.lat},${d.lng}],16)">Show on map</button>` : ''}
+    </div>`;
+  $('#m-detail').classList.add('open');
+}
+
+function closeModals() {
+  // Uploaded photos for a date form that was cancelled are deleted again.
+  if ($('#m-date').classList.contains('open') && !saved && newUploads.length) removePhotos(newUploads);
+  newUploads = []; saved = false;
+  document.querySelectorAll('.modal').forEach(m => m.classList.remove('open'));
+  pendingWishId = null;
+}
+document.addEventListener('keydown', e => e.key === 'Escape' && closeModals());
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+const stars = n => n ? '★'.repeat(n) + '☆'.repeat(5 - n) : '';
+
+start();
+</script>
+</body>
+</html>
