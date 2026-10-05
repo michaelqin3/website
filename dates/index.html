@@ -54,8 +54,14 @@
   .picked{font-size:13px;color:#2e7d4f;margin-top:4px}
   .minimap{height:200px;border-radius:10px;border:1px solid var(--line);margin-top:8px}
   .hint{font-size:12px;color:var(--muted);margin-top:4px}
-  .thumbs{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
-  .thumbs img{width:64px;height:64px;object-fit:cover;border-radius:8px}
+  .thumbs{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;padding-top:6px}
+  .thumb{position:relative}
+  .thumb img{width:64px;height:64px;object-fit:cover;border-radius:8px;cursor:zoom-in;display:block}
+  .thumb .x{position:absolute;top:-7px;right:-7px;width:22px;height:22px;border-radius:50%;border:2px solid #fff;background:var(--ink);color:#fff;font-size:13px;line-height:1;padding:0;cursor:pointer}
+  #lightbox{position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,.88);display:none;align-items:center;justify-content:center;padding:16px;cursor:zoom-out}
+  #lightbox.open{display:flex}
+  #lightbox img{max-width:100%;max-height:100%;border-radius:8px}
+  #lightbox .close{position:absolute;top:12px;right:14px;background:none;border:0;color:#fff;font-size:30px;cursor:pointer}
   .rate{display:flex;gap:4px;font-size:26px;cursor:pointer;user-select:none}
   .rate span{color:#ddd}.rate span.on{color:#e8a33d}
   body.no-rita .rita-only{display:none}
@@ -174,6 +180,9 @@
     </div>
   </form>
 </div>
+
+<!-- Full-size photo -->
+<div id="lightbox" onclick="closeLightbox()"><button class="close" aria-label="Close">×</button><img alt=""></div>
 
 <!-- Detail -->
 <div class="modal" id="m-detail" onclick="if(event.target===this)closeModals()">
@@ -454,7 +463,10 @@ function openDateForm(d = null, prefill = null) {
   showMini('d');
 }
 function renderThumbs() {
-  $('#d-thumbs').innerHTML = photos.map((p, i) => `<img src="${purl(p)}" title="click to remove" onclick="photos.splice(${i},1);renderThumbs()">`).join('');
+  $('#d-thumbs').innerHTML = photos.map((p, i) => `<div class="thumb">
+      <img src="${purl(p)}" alt="" onclick="openLightbox(this.src)">
+      <button type="button" class="x" aria-label="Remove photo" onclick="photos.splice(${i},1);renderThumbs()">×</button>
+    </div>`).join('');
 }
 // Shrink photos before upload: max 1600px JPEG keeps storage small (~300KB each).
 async function shrink(file) {
@@ -536,7 +548,7 @@ function openDetail(id) {
     <h2 style="margin-bottom:2px">${esc(d.title)}</h2>
     <div class="meta">${[placeLine(d) ? '📍 ' + esc(placeLine(d)) : '', d.date].filter(Boolean).join(' · ')}</div>
     ${ratingsHtml(d) ? `<div class="meta">${ratingsHtml(d)}</div>` : ''}
-    ${d.photos?.length ? `<div class="gal">${d.photos.map(p => `<img src="${purl(p)}" onclick="window.open(this.src)">`).join('')}</div>` : ''}
+    ${d.photos?.length ? `<div class="gal">${d.photos.map(p => `<img src="${purl(p)}" onclick="openLightbox(this.src)">`).join('')}</div>` : ''}
     ${d.review ? `<p class="review">${esc(d.review)}</p>` : '<p class="meta">No review yet.</p>'}
     <div class="foot">
       <button class="btn ghost" onclick="del('dates','${d.id}')">Delete</button>
@@ -553,7 +565,13 @@ function closeModals() {
   document.querySelectorAll('.modal').forEach(m => m.classList.remove('open'));
   pendingWishId = null;
 }
-document.addEventListener('keydown', e => e.key === 'Escape' && closeModals());
+function openLightbox(src) { $('#lightbox img').src = src; $('#lightbox').classList.add('open'); }
+function closeLightbox() { $('#lightbox').classList.remove('open'); }
+// Escape closes the enlarged photo first, then any open form.
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  if ($('#lightbox').classList.contains('open')) closeLightbox(); else closeModals();
+});
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 const ratingsHtml = d => [['Michael', d.rating], ['Rita', d.rating_rita]].filter(([, n]) => n)
   .map(([who, n]) => `${who} <span class="stars">${stars(n)}</span>`).join(' · ');
