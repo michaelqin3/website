@@ -363,15 +363,37 @@ function render() {
   renderMap(); renderList(); renderWish();
 }
 
-// ---------- place search + pin picker (Photon / OpenStreetMap, limited to cfg.bbox) ----------
+// ---------- place search + pin picker ----------
+// Two free sources:
+//  - NYC Geosearch (NYC City Planning, official city address database): exact NYC street addresses.
+//  - Photon (OpenStreetMap): businesses and landmarks, and anything outside NYC.
+
 // "Fifth Avenue" -> "5th Avenue": OSM stores NYC streets as numerals.
 const ORD = {first: '1st', second: '2nd', third: '3rd', fourth: '4th', fifth: '5th', sixth: '6th', seventh: '7th', eighth: '8th', ninth: '9th', tenth: '10th', eleventh: '11th', twelfth: '12th'};
 const normQuery = q => q.replace(/\b(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth)(?=\s+(ave|avenue|av|st|street|pl|place)\b)/gi, m => ORD[m.toLowerCase()]);
+
+// "WEST B'WAY" -> "West Broadway", "5 AVENUE" -> "5th Avenue", "EAST 14 STREET" -> "East 14th Street".
+const ordinal = n => n + (n % 100 >= 11 && n % 100 <= 13 ? 'th' : ({1: 'st', 2: 'nd', 3: 'rd'}[n % 10] || 'th'));
+function prettyStreet(s) {
+  if (!s) return '';
+  return s.toLowerCase()
+    .replace(/\bb'way\b/g, 'broadway')
+    .replace(/\b(\d+)(?=\s+(avenue|street|place|road|drive|lane|terrace|court|walk)\b)/g, m => ordinal(+m))
+    .replace(/(^|[\s-])([a-z])/g, (m, sep, c) => sep + c.toUpperCase());
+}
+const STATES = {'New York': 'NY', 'New Jersey': 'NJ', 'Connecticut': 'CT', 'Pennsylvania': 'PA'};
+// -> "465 West Broadway, New York, NY 10012". Manhattan addresses use "New York"; other boroughs their own name.
+function usAddress({house, street, borough, city, state, zip}) {
+  const line1 = [house, street].filter(Boolean).join(' ');
+  const town = borough && borough !== 'Manhattan' ? borough : (city || borough);
+  const st = [STATES[state] || state, zip].filter(Boolean).join(' ');
+  return [line1, town, st].filter(Boolean).join(', ');
+}
+
 function fmt(p, coords) {
   const street = [p.housenumber, p.street].filter(Boolean).join(' ');
-  const area = p.district || p.city;
-  const address = [street, area].filter(Boolean).join(', ');
-  return {poi: p.name || '', title: p.name || street || area || 'Dropped pin', address,
+  const address = usAddress({house: p.housenumber, street: p.street, borough: p.district, city: p.city, state: p.state, zip: p.postcode});
+  return {poi: p.name || '', title: p.name || street || p.district || p.city || 'Dropped pin', address,
           kind: (p.osm_value || '').replace(/_/g, ' '), lat: coords[1], lng: coords[0]};
 }
 async function photon(q) {
@@ -379,11 +401,40 @@ async function photon(q) {
   const r = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=7&lang=en&lat=${lat}&lon=${lon}&bbox=${cfg.bbox.join(',')}`);
   return (await r.json()).features.map(f => fmt(f.properties, f.geometry.coordinates));
 }
+const GEOSEARCH = 'https://geosearch.planninglabs.nyc/v2';
+function fmtGeo(f) {
+  const p = f.properties, street = prettyStreet(p.street);
+  return {poi: '', house: p.housenumber || '', title: [p.housenumber, street].filter(Boolean).join(' ') || p.label, kind: 'address',
+          address: usAddress({house: p.housenumber, street, borough: p.borough, city: p.locality, state: p.region_a, zip: p.postalcode}),
+          lat: f.geometry.coordinates[1], lng: f.geometry.coordinates[0]};
+}
+async function geosearch(q) {
+  const r = await fetch(`${GEOSEARCH}/autocomplete?text=${encodeURIComponent(q)}&size=6`);
+  const seen = new Set();
+  // The city lists some buildings under several spellings ("WEST B'WAY", "WEST BROADWAY"); keep one per building.
+  return ((await r.json()).features || []).map(fmtGeo).filter(it => {
+    const k = `${it.title.split(' ')[0]}|${it.lat.toFixed(5)}|${it.lng.toFixed(5)}`;
+    return !seen.has(k) && seen.add(k);
+  });
+}
+const metersApart = (a, b) => Math.hypot((a.lat - b.lat) * 111320, (a.lng - b.lng) * 111320 * Math.cos(a.lat * Math.PI / 180));
 async function searchPlaces(q) {
   const n = normQuery(q);
-  const lists = await Promise.all(n === q ? [photon(q)] : [photon(n), photon(q)]);
+  let [geo, ...osm] = await Promise.all([
+    geosearch(q).catch(() => []),
+    ...(n === q ? [photon(q)] : [photon(n), photon(q)]).map(p => p.catch(() => [])),
+  ]);
+  // "246 5th ave" should not list Queens-style "246-05 ..." or "100 GARAGE ..." entries when the exact number exists.
+  const num = q.match(/^\s*(\d+(?:-\d+)?)\b/)?.[1];
+  if (num && geo.some(g => g.house === num)) geo = geo.filter(g => g.house === num);
+  geo = geo.slice(0, 4);   // leave room for businesses at the same address
   const seen = new Set();
-  return lists.flat().filter(it => { const k = `${it.title}|${it.lat.toFixed(5)}|${it.lng.toFixed(5)}`; return !seen.has(k) && seen.add(k); }).slice(0, 8);
+  const places = osm.flat()
+    .filter(it => { const k = `${it.title}|${it.lat.toFixed(5)}|${it.lng.toFixed(5)}`; return !seen.has(k) && seen.add(k); })
+    // An OSM address-only row duplicates the city's own address for the same building.
+    .filter(it => it.poi || !geo.some(g => metersApart(g, it) < 60));
+  // Typing a house number means an address: show the city's addresses first. Otherwise businesses first.
+  return (/^\d/.test(q) ? [...geo, ...places] : [...places, ...geo]).slice(0, 8);
 }
 
 // Shared search box behaviour: debounce, list results, call onPick(result).
@@ -395,7 +446,7 @@ function attachSearch(inp, res, onPick) {
     if (q.length < 3) { res.style.display = 'none'; return; }
     t = setTimeout(async () => {
       const items = await searchPlaces(q);
-      res.innerHTML = items.map((it, i) => `<div data-i="${i}"><b>${esc(it.title)}</b> <span class="meta">${esc(it.kind)}</span><br><span class="meta">${esc(it.poi ? it.address : '')}</span></div>`).join('')
+      res.innerHTML = items.map((it, i) => `<div data-i="${i}"><b>${esc(it.title)}</b> <span class="meta">${esc(it.kind)}</span><br><span class="meta">${esc(it.address !== it.title ? it.address : '')}</span></div>`).join('')
         || '<div class="meta">No results. Try the street address, or tap the map below to drop the pin.</div>';
       res.style.display = 'block';
       res.querySelectorAll('div[data-i]').forEach(d => d.onclick = () => { res.style.display = 'none'; onPick(items[d.dataset.i]); });
@@ -403,6 +454,13 @@ function attachSearch(inp, res, onPick) {
   });
 }
 async function reverseAddress(ll) {
+  // In NYC the city's address database gives the exact building. Outside NYC it returns a
+  // far-away junk match, so only trust it when it's within 100 m, else ask OpenStreetMap.
+  try {
+    const r = await fetch(`${GEOSEARCH}/reverse?point.lat=${ll.lat}&point.lon=${ll.lng}&size=1`);
+    const f = (await r.json()).features?.[0];
+    if (f && f.properties.distance < 0.1 && f.properties.housenumber) return fmtGeo(f).address;
+  } catch {}
   try {
     const r = await fetch(`https://photon.komoot.io/reverse?lat=${ll.lat}&lon=${ll.lng}&lang=en&limit=1`);
     const f = (await r.json()).features[0];
