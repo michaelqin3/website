@@ -58,6 +58,7 @@
   .thumbs img{width:64px;height:64px;object-fit:cover;border-radius:8px}
   .rate{display:flex;gap:4px;font-size:26px;cursor:pointer;user-select:none}
   .rate span{color:#ddd}.rate span.on{color:#e8a33d}
+  body.no-rita .rita-only{display:none}
   .foot{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
   /* detail */
   .gal{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px;margin:12px 0}
@@ -135,9 +136,11 @@
     <div class="picked" id="d-picked"></div>
     <div class="minimap" id="d-map"></div>
     <div class="hint">Can't find it? Tap the map to drop the pin, or drag the pin to adjust.</div>
+    <label>Date</label>
+    <input type="date" name="date">
     <div class="row">
-      <div><label>Date</label><input type="date" name="date"></div>
-      <div><label>Rating</label><div class="rate" id="d-rate"></div></div>
+      <div><label>Michael's rating</label><div class="rate" id="d-rate-m"></div></div>
+      <div class="rita-only"><label>Rita's rating</label><div class="rate" id="d-rate-r"></div></div>
     </div>
     <label>Review</label>
     <textarea name="review" placeholder="How was it? What did you eat, what would you do again…"></textarea>
@@ -187,7 +190,8 @@ let map, layer;
 let picked = {d: null, w: null};         // per form: {name, address, lat, lng}
 let hasAddress = false;                  // true once the address column exists in Supabase
 let photos = [], origPhotos = [], newUploads = [];  // photo paths for the date being edited
-let rating = 0, pendingWishId = null, saved = false;
+let ratings = {m: 0, r: 0}, pendingWishId = null, saved = false;   // m = Michael (column "rating"), r = Rita
+let hasRita = false;                     // true once the rating_rita column exists in Supabase
 const BUCKET = 'photos';
 
 // ---------- startup & auth ----------
@@ -217,6 +221,8 @@ async function enter() {
     return;
   }
   hasAddress = !(await sb.from('dates').select('address').limit(1)).error;
+  hasRita = !(await sb.from('dates').select('rating_rita').limit(1)).error;
+  document.body.classList.toggle('no-rita', !hasRita);
   document.body.classList.add('authed');
   if (!map) initMap();
   setTimeout(() => map.invalidateSize(), 50);
@@ -279,7 +285,7 @@ function renderMap() {
   db.dates.filter(d => d.lat != null).forEach(d => {
     const first = purl(d.photos?.[0]);
     const m = L.marker([d.lat, d.lng], {icon: first ? photoPin(first) : pin('❤️')}).addTo(layer);
-    m.bindPopup(`<div class="popup"><h4>${esc(d.title)}</h4>${placeLine(d) ? `<div class="meta">📍 ${esc(placeLine(d))}</div>` : ''}<span class="stars">${stars(d.rating)}</span> <span class="meta">${d.date || ''}</span>${first ? `<img src="${first}">` : ''}<br><a href="#" onclick="openDetail('${d.id}');return false">Open</a></div>`);
+    m.bindPopup(`<div class="popup"><h4>${esc(d.title)}</h4>${placeLine(d) ? `<div class="meta">📍 ${esc(placeLine(d))}</div>` : ''}<div class="meta">${[ratingsHtml(d), d.date].filter(Boolean).join(' · ')}</div>${first ? `<img src="${first}">` : ''}<br><a href="#" onclick="openDetail('${d.id}');return false">Open</a></div>`);
     pts.push([d.lat, d.lng]);
   });
   db.wishlist.filter(w => w.lat != null).forEach(w => {
@@ -302,7 +308,7 @@ function renderList() {
       <div class="b">
         <h3>${esc(d.title)}</h3>
         <div class="meta">${esc(d.place || d.address || '')}</div>
-        <div class="meta"><span class="stars">${stars(d.rating)}</span> ${d.date ? '· ' + d.date : ''}</div>
+        <div class="meta">${[ratingsHtml(d), d.date].filter(Boolean).join(' · ')}</div>
       </div>
     </div>`;
   }).join('');
@@ -422,9 +428,11 @@ wireSearch('w');
 const placeLine = x => [x.place, x.address].filter(Boolean).join(' · ');
 
 // ---------- date form ----------
-function setRating(n) {
-  rating = n;
-  $('#d-rate').innerHTML = [1, 2, 3, 4, 5].map(i => `<span class="${i <= n ? 'on' : ''}" onclick="setRating(${i})">★</span>`).join('');
+// Tap a star to rate; tap the same star again to clear.
+function setRating(who, n) { ratings[who] = ratings[who] === n ? 0 : n; drawRating(who); }
+function drawRating(who) {
+  const n = ratings[who];
+  $(`#d-rate-${who}`).innerHTML = [1, 2, 3, 4, 5].map(i => `<span class="${i <= n ? 'on' : ''}" onclick="setRating('${who}',${i})">★</span>`).join('');
 }
 function openDateForm(d = null, prefill = null) {
   const f = $('#f-date'); f.reset();
@@ -440,7 +448,7 @@ function openDateForm(d = null, prefill = null) {
   picked.d = d.lat != null ? {name: d.place || '', address: d.address || '', lat: d.lat, lng: d.lng} : null;
   $('#d-picked').textContent = picked.d ? '📍 ' + (d.address || 'Pin set') : '';
   photos = [...(d.photos || [])]; origPhotos = [...photos]; newUploads = []; saved = false;
-  setRating(d.rating || 0);
+  ratings = {m: d.rating || 0, r: d.rating_rita || 0}; drawRating('m'); drawRating('r');
   renderThumbs();
   $('#m-date').classList.add('open');
   showMini('d');
@@ -479,11 +487,12 @@ async function saveDate(e) {
   const f = e.target, btn = $('#d-save');
   const item = {
     title: f.title.value.trim(), date: f.date.value || null,
-    review: f.review.value.trim(), rating, photos,
+    review: f.review.value.trim(), rating: ratings.m, photos,
     place: $('#d-name').value.trim() || picked.d?.name || null,
     lat: picked.d?.lat ?? null, lng: picked.d?.lng ?? null,
   };
   if (hasAddress) item.address = picked.d?.address || $('#d-loc').value.trim() || null;
+  if (hasRita) item.rating_rita = ratings.r;
   btn.disabled = true;
   try {
     if (f.id.value) check(await sb.from('dates').update(item).eq('id', f.id.value));
@@ -525,7 +534,8 @@ function openDetail(id) {
   const d = db.dates.find(x => x.id === id); if (!d) return;
   $('#detail').innerHTML = `
     <h2 style="margin-bottom:2px">${esc(d.title)}</h2>
-    <div class="meta">${placeLine(d) ? '📍 ' + esc(placeLine(d)) + ' · ' : ''}${d.date || ''} · <span class="stars">${stars(d.rating)}</span></div>
+    <div class="meta">${[placeLine(d) ? '📍 ' + esc(placeLine(d)) : '', d.date].filter(Boolean).join(' · ')}</div>
+    ${ratingsHtml(d) ? `<div class="meta">${ratingsHtml(d)}</div>` : ''}
     ${d.photos?.length ? `<div class="gal">${d.photos.map(p => `<img src="${purl(p)}" onclick="window.open(this.src)">`).join('')}</div>` : ''}
     ${d.review ? `<p class="review">${esc(d.review)}</p>` : '<p class="meta">No review yet.</p>'}
     <div class="foot">
@@ -545,6 +555,8 @@ function closeModals() {
 }
 document.addEventListener('keydown', e => e.key === 'Escape' && closeModals());
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+const ratingsHtml = d => [['Michael', d.rating], ['Rita', d.rating_rita]].filter(([, n]) => n)
+  .map(([who, n]) => `${who} <span class="stars">${stars(n)}</span>`).join(' · ');
 const stars = n => n ? '★'.repeat(n) + '☆'.repeat(5 - n) : '';
 
 start();
