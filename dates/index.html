@@ -64,7 +64,20 @@
   #lightbox .close{position:absolute;top:12px;right:14px;background:none;border:0;color:#fff;font-size:30px;cursor:pointer}
   .rate{display:flex;gap:4px;font-size:26px;cursor:pointer;user-select:none}
   .rate span{color:#ddd}.rate span.on{color:#e8a33d}
-  body.no-rita .rita-only{display:none}
+  body.no-rita .rita-only, body.no-stops .stops-only{display:none}
+  .rate.sm{font-size:20px}
+  .stop{border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-top:10px;background:#fcfbf9}
+  .stop.active{border-color:var(--ink)}
+  .stop-head{display:flex;align-items:center;gap:8px;font-weight:600;font-size:14px}
+  .stop-head .rm{margin-left:auto;border:0;background:none;color:var(--muted);font-size:20px;line-height:1;cursor:pointer}
+  .stop input[type=text]{margin-top:6px;background:#fff}
+  .stop .row label{margin-top:8px}
+  .num,.numpin{width:22px;height:22px;border-radius:50%;background:var(--accent);color:#fff;display:inline-flex;align-items:center;justify-content:center;font:600 12px/1 sans-serif;flex-shrink:0}
+  .numpin{width:24px;height:24px;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)}
+  .numpin.active{background:var(--ink)}
+  .stoplist{margin:12px 0;padding:0;list-style:none}
+  .stoplist li{display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)}
+  .stoplist li:last-child{border-bottom:0}
   .foot{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
   /* detail */
   .gal{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px;margin:12px 0}
@@ -134,19 +147,16 @@
     <input type="hidden" name="id">
     <label>Title</label>
     <input type="text" name="title" required placeholder="Ramen + arcade night">
-    <label>Place name</label>
-    <input type="text" id="d-name" placeholder="Bondi Sushi">
-    <label>Location</label>
-    <input type="text" id="d-loc" placeholder="Search a place or address, e.g. 246 5th Ave" autocomplete="off">
-    <div class="results" id="d-results"></div>
-    <div class="picked" id="d-picked"></div>
-    <div class="minimap" id="d-map"></div>
-    <div class="hint">Can't find it? Tap the map to drop the pin, or drag the pin to adjust.</div>
     <label>Date</label>
     <input type="date" name="date">
+    <label>Places</label>
+    <div id="d-stops"></div>
+    <button type="button" class="btn ghost sm stops-only" style="margin-top:8px" onclick="addStop()">+ Add another place</button>
+    <div class="minimap" id="d-map"></div>
+    <div class="hint" id="d-hint">Tap the map to set the pin for the highlighted place, or drag a pin to adjust.</div>
     <div class="row">
-      <div><label>Michael's rating</label><div class="rate" id="d-rate-m"></div></div>
-      <div class="rita-only"><label>Rita's rating</label><div class="rate" id="d-rate-r"></div></div>
+      <div><label>Michael's overall</label><div class="rate" id="d-rate-m"></div></div>
+      <div class="rita-only"><label>Rita's overall</label><div class="rate" id="d-rate-r"></div></div>
     </div>
     <label>Review</label>
     <textarea name="review" placeholder="How was it? What did you eat, what would you do again…"></textarea>
@@ -196,7 +206,9 @@ let db = {dates: [], wishlist: []};
 let urls = {};                           // photo path -> signed URL
 let cfg = {center: [40.73, -73.97], bbox: [-74.26, 40.49, -73.70, 40.92]};  // NYC defaults
 let map, layer;
-let picked = {d: null, w: null};         // per form: {name, address, lat, lng}
+let picked = {w: null};                  // wishlist form: {name, address, lat, lng}
+let stops = [], activeStop = 0;          // date form: [{name, address, lat, lng, rating, rating_rita}]
+let hasStops = false;                    // true once the stops column exists in Supabase
 let hasAddress = false;                  // true once the address column exists in Supabase
 let photos = [], origPhotos = [], newUploads = [];  // photo paths for the date being edited
 let ratings = {m: 0, r: 0}, pendingWishId = null, saved = false;   // m = Michael (column "rating"), r = Rita
@@ -231,7 +243,9 @@ async function enter() {
   }
   hasAddress = !(await sb.from('dates').select('address').limit(1)).error;
   hasRita = !(await sb.from('dates').select('rating_rita').limit(1)).error;
+  hasStops = !(await sb.from('dates').select('stops').limit(1)).error;
   document.body.classList.toggle('no-rita', !hasRita);
+  document.body.classList.toggle('no-stops', !hasStops);
   document.body.classList.add('authed');
   if (!map) initMap();
   setTimeout(() => map.invalidateSize(), 50);
@@ -291,11 +305,15 @@ const photoPin = (src) => L.divIcon({html: `<div class="photopin" style="backgro
 function renderMap() {
   layer.clearLayers();
   const pts = [];
-  db.dates.filter(d => d.lat != null).forEach(d => {
+  db.dates.forEach(d => {
+    const ss = getStops(d).filter(s => s.lat != null);
     const first = purl(d.photos?.[0]);
-    const m = L.marker([d.lat, d.lng], {icon: first ? photoPin(first) : pin('❤️')}).addTo(layer);
-    m.bindPopup(`<div class="popup"><h4>${esc(d.title)}</h4>${placeLine(d) ? `<div class="meta">📍 ${esc(placeLine(d))}</div>` : ''}<div class="meta">${[ratingsHtml(d), d.date].filter(Boolean).join(' · ')}</div>${first ? `<img src="${first}">` : ''}<br><a href="#" onclick="openDetail('${d.id}');return false">Open</a></div>`);
-    pts.push([d.lat, d.lng]);
+    if (ss.length > 1) L.polyline(ss.map(s => [s.lat, s.lng]), {color: '#d9534f', weight: 2, dashArray: '4 6', opacity: .7}).addTo(layer);
+    ss.forEach((s, i) => {
+      const m = L.marker([s.lat, s.lng], {icon: first ? photoPin(first) : pin('❤️')}).addTo(layer);
+      m.bindPopup(`<div class="popup"><h4>${esc(s.name || d.title)}</h4>${s.address ? `<div class="meta">📍 ${esc(s.address)}</div>` : ''}${ratingsHtml(s) ? `<div class="meta">${ratingsHtml(s)}</div>` : ''}<div class="meta">${esc(d.title)}${d.date ? ' · ' + d.date : ''}${ss.length > 1 ? ` · stop ${i + 1} of ${ss.length}` : ''}</div>${first ? `<img src="${first}">` : ''}<br><a href="#" onclick="openDetail('${d.id}');return false">Open</a></div>`);
+      pts.push([s.lat, s.lng]);
+    });
   });
   db.wishlist.filter(w => w.lat != null).forEach(w => {
     const m = L.marker([w.lat, w.lng], {icon: pin('✨'), opacity: .85}).addTo(layer);
@@ -316,7 +334,7 @@ function renderList() {
       <div class="ph" style="${first ? `background-image:url('${first}')` : ''}">${first ? '' : '💌'}</div>
       <div class="b">
         <h3>${esc(d.title)}</h3>
-        <div class="meta">${esc(d.place || d.address || '')}</div>
+        <div class="meta">${esc(getStops(d).map(s => s.name || s.address).filter(Boolean).join(' → '))}</div>
         <div class="meta">${[ratingsHtml(d), d.date].filter(Boolean).join(' · ')}</div>
       </div>
     </div>`;
@@ -368,50 +386,10 @@ async function searchPlaces(q) {
   return lists.flat().filter(it => { const k = `${it.title}|${it.lat.toFixed(5)}|${it.lng.toFixed(5)}`; return !seen.has(k) && seen.add(k); }).slice(0, 8);
 }
 
-const minis = {};   // per form: {map, marker}
-function showMini(key) {
-  setTimeout(() => {
-    if (!minis[key]) {
-      const m = L.map(`${key}-map`).setView(cfg.center, 12);
-      L.tileLayer(cfg.tileUrl || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom: 19, attribution: '&copy; OpenStreetMap'}).addTo(m);
-      m.on('click', e => dropPin(key, e.latlng));
-      minis[key] = {map: m, marker: null};
-    }
-    const mm = minis[key];
-    mm.map.invalidateSize();
-    const p = picked[key];
-    if (p) { placeMarker(key, [p.lat, p.lng]); mm.map.setView([p.lat, p.lng], 16); }
-    else { if (mm.marker) { mm.marker.remove(); mm.marker = null; } mm.map.setView(cfg.center, 12); }
-  }, 60);
-}
-function placeMarker(key, ll) {
-  const mm = minis[key]; if (!mm) return;
-  if (!mm.marker) {
-    mm.marker = L.marker(ll, {draggable: true}).addTo(mm.map);
-    mm.marker.on('dragend', () => dropPin(key, mm.marker.getLatLng()));
-  } else mm.marker.setLatLng(ll);
-}
-// Manual pin: keep the coordinates, then look up the nearest street address.
-let pinSeq = 0;
-async function dropPin(key, ll) {
-  const seq = ++pinSeq, pk = $(`#${key}-picked`);
-  picked[key] = {name: picked[key]?.name || '', address: '', lat: ll.lat, lng: ll.lng};
-  placeMarker(key, ll);
-  pk.textContent = '📍 Pin dropped, finding address…';
-  try {
-    const r = await fetch(`https://photon.komoot.io/reverse?lat=${ll.lat}&lon=${ll.lng}&lang=en&limit=1`);
-    const f = (await r.json()).features[0];
-    if (seq !== pinSeq || !picked[key]) return;
-    const it = f ? fmt(f.properties, f.geometry.coordinates) : null;
-    picked[key].address = it?.address || '';
-    $(`#${key}-loc`).value = picked[key].address;
-  } catch {}
-  if (seq === pinSeq) pk.textContent = '📍 ' + (picked[key].address || 'Pin set');
-}
-function wireSearch(key) {
-  const inp = $(`#${key}-loc`), res = $(`#${key}-results`), pk = $(`#${key}-picked`);
+// Shared search box behaviour: debounce, list results, call onPick(result).
+function attachSearch(inp, res, onPick) {
   let t;
-  inp.oninput = () => {
+  inp.addEventListener('input', () => {
     clearTimeout(t);
     const q = inp.value.trim();
     if (q.length < 3) { res.style.display = 'none'; return; }
@@ -420,21 +398,153 @@ function wireSearch(key) {
       res.innerHTML = items.map((it, i) => `<div data-i="${i}"><b>${esc(it.title)}</b> <span class="meta">${esc(it.kind)}</span><br><span class="meta">${esc(it.poi ? it.address : '')}</span></div>`).join('')
         || '<div class="meta">No results. Try the street address, or tap the map below to drop the pin.</div>';
       res.style.display = 'block';
-      res.querySelectorAll('div[data-i]').forEach(d => d.onclick = () => {
-        const it = items[d.dataset.i];
-        picked[key] = {name: it.poi, address: it.address, lat: it.lat, lng: it.lng};
-        inp.value = it.address || it.title;
-        if (key === 'd' && it.poi && !$('#d-name').value.trim()) $('#d-name').value = it.poi;
-        pk.textContent = '📍 ' + [it.poi, it.address].filter(Boolean).join(' · ');
-        res.style.display = 'none';
-        placeMarker(key, [it.lat, it.lng]); minis[key]?.map.setView([it.lat, it.lng], 16);
-      });
+      res.querySelectorAll('div[data-i]').forEach(d => d.onclick = () => { res.style.display = 'none'; onPick(items[d.dataset.i]); });
     }, 350);
-  };
+  });
 }
-wireSearch('d');
-wireSearch('w');
+async function reverseAddress(ll) {
+  try {
+    const r = await fetch(`https://photon.komoot.io/reverse?lat=${ll.lat}&lon=${ll.lng}&lang=en&limit=1`);
+    const f = (await r.json()).features[0];
+    return f ? fmt(f.properties, f.geometry.coordinates).address : '';
+  } catch { return ''; }
+}
+const tiles = m => L.tileLayer(cfg.tileUrl || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom: 19, attribution: '&copy; OpenStreetMap'}).addTo(m);
+
+// ----- wishlist form: one location -----
+let wmap, wmarker;
+function showWishMap() {
+  setTimeout(() => {
+    if (!wmap) { wmap = L.map('w-map').setView(cfg.center, 12); tiles(wmap); wmap.on('click', e => wishPin(e.latlng)); }
+    wmap.invalidateSize();
+    if (wmarker) { wmarker.remove(); wmarker = null; }
+    wmap.setView(cfg.center, 12);
+  }, 60);
+}
+function wishMarker(ll) {
+  if (!wmarker) { wmarker = L.marker(ll, {draggable: true}).addTo(wmap); wmarker.on('dragend', () => wishPin(wmarker.getLatLng())); }
+  else wmarker.setLatLng(ll);
+}
+async function wishPin(ll) {
+  picked.w = {name: picked.w?.name || '', address: '', lat: ll.lat, lng: ll.lng};
+  const p = picked.w; wishMarker(ll);
+  $('#w-picked').textContent = '📍 Pin dropped, finding address…';
+  const addr = await reverseAddress(ll);
+  if (picked.w !== p) return;
+  p.address = addr; $('#w-loc').value = addr;
+  $('#w-picked').textContent = '📍 ' + (addr || 'Pin set');
+}
+attachSearch($('#w-loc'), $('#w-results'), it => {
+  picked.w = {name: it.poi, address: it.address, lat: it.lat, lng: it.lng};
+  $('#w-loc').value = it.address || it.title;
+  $('#w-picked').textContent = '📍 ' + [it.poi, it.address].filter(Boolean).join(' · ');
+  wishMarker([it.lat, it.lng]); wmap.setView([it.lat, it.lng], 16);
+});
 const placeLine = x => [x.place, x.address].filter(Boolean).join(' · ');
+
+// ----- date form: several places ("stops") per date, each with its own ratings -----
+// Older rows kept one location in place/address/lat/lng; treat that as a single stop.
+function getStops(d) {
+  if (Array.isArray(d.stops) && d.stops.length) return d.stops;
+  return d.lat != null || d.place || d.address ? [{name: d.place, address: d.address, lat: d.lat, lng: d.lng}] : [];
+}
+let dmap, dlayer;
+const numIcon = (n, active) => L.divIcon({html: `<div class="numpin${active ? ' active' : ''}">${n}</div>`, className: '', iconSize: [24, 24], iconAnchor: [12, 12]});
+const stopEl = i => $('#d-stops').children[i];
+function showDateMap() {
+  setTimeout(() => {
+    if (!dmap) {
+      dmap = L.map('d-map').setView(cfg.center, 12); tiles(dmap);
+      dlayer = L.layerGroup().addTo(dmap);
+      dmap.on('click', e => pinStop(activeStop, e.latlng));
+    }
+    dmap.invalidateSize();
+    drawStopMarkers(true);
+  }, 60);
+}
+function drawStopMarkers(fit) {
+  if (!dlayer) return;
+  dlayer.clearLayers();
+  const pts = [];
+  stops.forEach((s, i) => {
+    if (s.lat == null) return;
+    const m = L.marker([s.lat, s.lng], {draggable: true, icon: numIcon(i + 1, i === activeStop)}).addTo(dlayer);
+    m.on('dragend', () => pinStop(i, m.getLatLng()));
+    m.on('click', () => setActiveStop(i));
+    pts.push([s.lat, s.lng]);
+  });
+  if (pts.length > 1) L.polyline(pts, {color: '#d9534f', weight: 2, dashArray: '4 6'}).addTo(dlayer);
+  if (!fit) return;
+  if (pts.length > 1) dmap.fitBounds(pts, {padding: [30, 30], maxZoom: 16});
+  else if (pts.length) dmap.setView(pts[0], 16);
+  else dmap.setView(cfg.center, 12);
+}
+function setActiveStop(i) {
+  if (!stops.length) return;
+  activeStop = Math.max(0, Math.min(i, stops.length - 1));
+  [...$('#d-stops').children].forEach((el, j) => el.classList.toggle('active', j === activeStop));
+  const s = stops[activeStop];
+  $('#d-hint').textContent = `Tap the map to set the pin for place ${activeStop + 1}${s.name ? ` (${s.name})` : ''}, or drag a pin to adjust.`;
+  drawStopMarkers(false);
+}
+async function pinStop(i, ll) {
+  const s = stops[i]; if (!s) return;
+  Object.assign(s, {lat: ll.lat, lng: ll.lng, address: ''});
+  setActiveStop(i);
+  stopEl(i).querySelector('.picked').textContent = '📍 Pin dropped, finding address…';
+  const addr = await reverseAddress(ll);
+  const j = stops.indexOf(s);
+  if (j < 0 || s.lat !== ll.lat) return;      // stop removed or moved again meanwhile
+  s.address = addr;
+  stopEl(j).querySelector('.loc').value = addr;
+  stopEl(j).querySelector('.picked').textContent = '📍 ' + (addr || 'Pin set');
+}
+function renderStops() {
+  $('#d-stops').innerHTML = stops.map((s, i) => `
+    <div class="stop${i === activeStop ? ' active' : ''}">
+      <div class="stop-head"><span class="num">${i + 1}</span><span>Place ${i + 1}</span>${stops.length > 1 ? `<button type="button" class="rm" aria-label="Remove place" onclick="event.stopPropagation();removeStop(${i})">×</button>` : ''}</div>
+      <input type="text" class="name" placeholder="Place name, e.g. Bondi Sushi" value="${esc(s.name || '')}">
+      <input type="text" class="loc" placeholder="Search a place or address, e.g. 246 5th Ave" autocomplete="off" value="${esc(s.address || '')}">
+      <div class="results"></div>
+      <div class="picked">${s.lat != null ? '📍 ' + esc(s.address || 'Pin set') : ''}</div>
+      <div class="row stops-only">
+        <div><label>Michael</label><div class="rate sm" data-who="rating"></div></div>
+        <div><label>Rita</label><div class="rate sm" data-who="rating_rita"></div></div>
+      </div>
+    </div>`).join('');
+  [...$('#d-stops').children].forEach((el, i) => {
+    const s = stops[i], name = el.querySelector('.name'), loc = el.querySelector('.loc');
+    el.addEventListener('click', () => setActiveStop(i));
+    el.addEventListener('focusin', () => setActiveStop(i));
+    name.addEventListener('input', () => { s.name = name.value; });
+    loc.addEventListener('input', () => { s.address = loc.value; });   // typed address is kept even without a pick
+    attachSearch(loc, el.querySelector('.results'), it => {
+      Object.assign(s, {address: it.address, lat: it.lat, lng: it.lng});
+      if (it.poi && !s.name?.trim()) { s.name = it.poi; name.value = it.poi; }
+      loc.value = it.address || it.title;
+      el.querySelector('.picked').textContent = '📍 ' + [it.poi, it.address].filter(Boolean).join(' · ');
+      setActiveStop(i);
+      dmap?.setView([it.lat, it.lng], 16);
+    });
+    drawStopRating(i, 'rating'); drawStopRating(i, 'rating_rita');
+  });
+}
+// Tap a star to rate; tap the same star again to clear.
+function setStopRating(i, who, n) { stops[i][who] = stops[i][who] === n ? 0 : n; drawStopRating(i, who); }
+function drawStopRating(i, who) {
+  const n = stops[i][who] || 0;
+  stopEl(i).querySelector(`.rate[data-who="${who}"]`).innerHTML =
+    [1, 2, 3, 4, 5].map(k => `<span class="${k <= n ? 'on' : ''}" onclick="setStopRating(${i},'${who}',${k})">★</span>`).join('');
+}
+function addStop() {
+  stops.push({}); renderStops(); setActiveStop(stops.length - 1);
+  stopEl(stops.length - 1).querySelector('.name').focus();
+}
+function removeStop(i) {
+  stops.splice(i, 1);
+  if (activeStop >= i && activeStop > 0) activeStop--;
+  renderStops(); setActiveStop(activeStop);
+}
 
 // ---------- date form ----------
 // Tap a star to rate; tap the same star again to clear.
@@ -451,16 +561,14 @@ function openDateForm(d = null, prefill = null) {
   f.title.value = d.title || '';
   f.date.value = d.date || new Date().toISOString().slice(0, 10);
   f.review.value = d.review || '';
-  $('#d-name').value = d.place || '';
-  $('#d-loc').value = d.address || '';
-  $('#d-results').style.display = 'none';
-  picked.d = d.lat != null ? {name: d.place || '', address: d.address || '', lat: d.lat, lng: d.lng} : null;
-  $('#d-picked').textContent = picked.d ? '📍 ' + (d.address || 'Pin set') : '';
+  stops = getStops(d).map(s => ({...s}));
+  if (!stops.length) stops = [{}];
+  activeStop = 0; renderStops(); setActiveStop(0);
   photos = [...(d.photos || [])]; origPhotos = [...photos]; newUploads = []; saved = false;
   ratings = {m: d.rating || 0, r: d.rating_rita || 0}; drawRating('m'); drawRating('r');
   renderThumbs();
   $('#m-date').classList.add('open');
-  showMini('d');
+  showDateMap();
 }
 function renderThumbs() {
   $('#d-thumbs').innerHTML = photos.map((p, i) => `<div class="thumb">
@@ -500,11 +608,22 @@ async function saveDate(e) {
   const item = {
     title: f.title.value.trim(), date: f.date.value || null,
     review: f.review.value.trim(), rating: ratings.m, photos,
-    place: $('#d-name').value.trim() || picked.d?.name || null,
-    lat: picked.d?.lat ?? null, lng: picked.d?.lng ?? null,
   };
-  if (hasAddress) item.address = picked.d?.address || $('#d-loc').value.trim() || null;
   if (hasRita) item.rating_rita = ratings.r;
+  const clean = stops
+    .filter(s => s.name?.trim() || s.address?.trim() || s.lat != null)
+    .map(s => ({name: s.name?.trim() || null, address: s.address?.trim() || null, lat: s.lat ?? null, lng: s.lng ?? null,
+                rating: s.rating || 0, rating_rita: s.rating_rita || 0}));
+  if (hasStops) {
+    // All places live in "stops"; clear the old single-location columns so they can't reappear.
+    Object.assign(item, {stops: clean, place: null, lat: null, lng: null});
+    if (hasAddress) item.address = null;
+  } else {
+    if (clean.length > 1) { alert('Saving more than one place needs the stops column. Run the SQL first, then refresh.'); return; }
+    const s = clean[0] || {};
+    Object.assign(item, {place: s.name ?? null, lat: s.lat ?? null, lng: s.lng ?? null});
+    if (hasAddress) item.address = s.address ?? null;
+  }
   btn.disabled = true;
   try {
     if (f.id.value) check(await sb.from('dates').update(item).eq('id', f.id.value));
@@ -521,7 +640,7 @@ async function saveDate(e) {
 function openWishForm() {
   $('#f-wish').reset(); picked.w = null; $('#w-picked').textContent = ''; $('#w-results').style.display = 'none';
   $('#m-wish').classList.add('open');
-  showMini('w');
+  showWishMap();
 }
 async function saveWish(e) {
   e.preventDefault();
@@ -537,27 +656,36 @@ async function saveWish(e) {
 }
 function convertWish(id) {
   const w = db.wishlist.find(x => x.id === id);
-  openDateForm(null, {title: w.title, place: w.place, address: w.address, lat: w.lat, lng: w.lng});
+  openDateForm(null, {title: w.title, stops: [{name: w.place, address: w.address, lat: w.lat, lng: w.lng}]});
   pendingWishId = id;
 }
 
 // ---------- detail ----------
 function openDetail(id) {
   const d = db.dates.find(x => x.id === id); if (!d) return;
+  const ss = getStops(d), located = ss.some(s => s.lat != null);
   $('#detail').innerHTML = `
     <h2 style="margin-bottom:2px">${esc(d.title)}</h2>
-    <div class="meta">${[placeLine(d) ? '📍 ' + esc(placeLine(d)) : '', d.date].filter(Boolean).join(' · ')}</div>
-    ${ratingsHtml(d) ? `<div class="meta">${ratingsHtml(d)}</div>` : ''}
+    <div class="meta">${d.date || ''}${ratingsHtml(d) ? ` · Overall: ${ratingsHtml(d)}` : ''}</div>
+    ${ss.length ? `<ol class="stoplist">${ss.map((s, i) => `<li><span class="num">${i + 1}</span><div>
+        <b>${esc(s.name || s.address || 'Place')}</b>
+        ${s.name && s.address ? `<div class="meta">${esc(s.address)}</div>` : ''}
+        ${ratingsHtml(s) ? `<div class="meta">${ratingsHtml(s)}</div>` : ''}</div></li>`).join('')}</ol>` : ''}
     ${d.photos?.length ? `<div class="gal">${d.photos.map(p => `<img src="${purl(p)}" onclick="openLightbox(this.src)">`).join('')}</div>` : ''}
     ${d.review ? `<p class="review">${esc(d.review)}</p>` : '<p class="meta">No review yet.</p>'}
     <div class="foot">
       <button class="btn ghost" onclick="del('dates','${d.id}')">Delete</button>
       <button class="btn ghost" onclick="closeModals();openDateForm(db.dates.find(x=>x.id==='${d.id}'))">Edit</button>
-      ${d.lat != null ? `<button class="btn" onclick="closeModals();showView('map');map.setView([${d.lat},${d.lng}],16)">Show on map</button>` : ''}
+      ${located ? `<button class="btn" onclick="showDayOnMap('${d.id}')">Show on map</button>` : ''}
     </div>`;
   $('#m-detail').classList.add('open');
 }
 
+function showDayOnMap(id) {
+  const pts = getStops(db.dates.find(x => x.id === id)).filter(s => s.lat != null).map(s => [s.lat, s.lng]);
+  closeModals(); showView('map');
+  setTimeout(() => pts.length > 1 ? map.fitBounds(pts, {padding: [60, 60], maxZoom: 16}) : map.setView(pts[0], 16), 80);
+}
 function closeModals() {
   // Uploaded photos for a date form that was cancelled are deleted again.
   if ($('#m-date').classList.contains('open') && !saved && newUploads.length) removePhotos(newUploads);
